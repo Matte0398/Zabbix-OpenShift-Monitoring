@@ -1,0 +1,1403 @@
+zabbix_export:
+  version: "7.0"
+  template_groups:
+    - uuid: 740f23489157459294ce211f5f3df96e
+      name: Templates/Applications
+  templates:
+    - uuid: 434812a76faf4708982a7f746dd0460b
+      template: "Template OpenShift Cluster by Thanos API"
+      name: "Template OpenShift Cluster by Thanos API"
+      description: |
+        Template for monitoring OpenShift clusters through the Thanos API.
+
+        The template focuses mainly on problem-oriented monitoring and discovers resources only when relevant warning or critical conditions are detected. This helps reduce HTTP requests, discovered objects, item count and overall load on both Zabbix and the OpenShift monitoring stack.
+
+        Some checks, such as Thanos query health and aggregate etcd latency, are intentionally always evaluated because they validate the monitoring path or provide cluster-level control-plane indicators.
+
+        Author: Matteo Z.
+      groups:
+        - name: Templates/Applications
+      items:
+        - uuid: 44bd2bd1477f40b6b080a3fa2adcbe80
+          name: "OCP: Critical ClusterOperators raw"
+          type: HTTP_AGENT
+          key: ocp.critical.clusteroperators.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects ClusterOperator conditions that indicate a problematic state.
+
+            The query returns only ClusterOperators where Available is False or Unknown, or where Degraded or Progressing is True. The result is used as master data for low-level discovery of problematic ClusterOperator conditions.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: 'max by(name,condition) ((cluster_operator_conditions{condition="Available",status=~"False|Unknown"}==1) or (cluster_operator_conditions{condition=~"Degraded|Progressing",status="True"}==1))'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: 62b0f1b78d14485f8272a70aa78aeffc
+          name: "OCP: Critical Etcd members status raw"
+          type: HTTP_AGENT
+          key: ocp.critical.etcd.members.status.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects etcd members matching a critical condition.
+
+            The query detects etcd members where the monitoring target is down or where the member reports no leader. The result is used as master data for low-level discovery of etcd members currently requiring attention.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: 'max by(instance)((up{job=~".*etcd.*"}==bool 0) or (etcd_server_has_leader==bool 0))>0'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: d0801ac980064b21874743a50f97e0bc
+          name: "OCP: Critical Jobs status raw"
+          type: HTTP_AGENT
+          key: ocp.critical.jobs.status.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects Jobs that are either failed or running longer than the configured threshold.
+
+            The query returns only Jobs matching a problematic condition and is used as master data for low-level discovery of failed or long-running Jobs.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: 'label_replace((kube_job_status_failed>0) or (((time()-kube_job_status_start_time) and on(namespace,job_name) (kube_job_status_active>0))>={$OCP.JOB.MAX.RUN.TIME}),"check","any","job_name",".*") or label_replace(kube_job_status_failed>0,"check","failed","job_name",".*") or label_replace(((time()-kube_job_status_start_time) and on(namespace,job_name) (kube_job_status_active>0))>={$OCP.JOB.MAX.RUN.TIME},"check","longrunning","job_name",".*")'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: e1420434f4a34beaa61731da210209f1
+          name: "OCP: Critical Node filesystems raw"
+          type: HTTP_AGENT
+          key: ocp.critical.node.filesystems.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects node filesystems whose usage is above the configured warning threshold.
+
+            The result is used as master data for low-level discovery of filesystems requiring attention. Filesystems, devices and mount points can be excluded through template macros.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: "100 * (1 - node_filesystem_avail_bytes/node_filesystem_size_bytes) >= {$OCP.NODE.FS.WARN}"
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: d4e87480c08b4d9583940051231a9e7d
+          name: "OCP: Critical Nodes status raw"
+          type: HTTP_AGENT
+          key: ocp.critical.nodes.status.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects nodes that are not ready or marked as unschedulable.
+
+            The result is used as master data for low-level discovery of nodes currently matching one or more problematic scheduling or readiness conditions.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: 'label_replace(max by (node) ((kube_node_status_condition{condition="Ready",status=~"false|unknown"} == 1) or (kube_node_spec_unschedulable == 1)), "check", "any", "node", ".*") or label_replace(max by (node) (kube_node_status_condition{condition="Ready",status=~"false|unknown"} == 1), "check", "not_ready", "node", ".*") or label_replace(max by (node) (kube_node_spec_unschedulable == 1), "check", "unschedulable", "node", ".*")'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: df7930d2bb2f4f18957ca7f4b5c87cc2
+          name: "OCP: Critical Pod CrashLoopBackOff raw"
+          type: HTTP_AGENT
+          key: ocp.critical.pods.crashloopbackoff.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects Pods with containers currently in CrashLoopBackOff state.
+
+            The result is used as master data for low-level discovery of Pods affected by container restart loop conditions.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: 'sum by(namespace,pod)(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"})>0'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: c7aa3a24c2a1466b8f2b9628b739d2a6
+          name: "OCP: Critical Pod problem state raw"
+          type: HTTP_AGENT
+          key: ocp.critical.pods.problem_state.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects Pods in problematic states.
+
+            The query detects Pods in Pending, Failed or Unknown phase, unschedulable Pods, and Pods that are not ready while excluding successfully completed Pods. The result is used as master data for low-level discovery of problematic Pods.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: 'max by(namespace,pod)(kube_pod_status_phase{phase=~"Pending|Failed|Unknown"} or kube_pod_status_unschedulable or (kube_pod_status_ready{condition="false"} unless on(namespace,pod) kube_pod_status_phase{phase="Succeeded"}))>0'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: 9888009c7ca94cfda97f199e5ff3350f
+          name: "OCP: Critical Pod restarts raw"
+          type: HTTP_AGENT
+          key: ocp.critical.pods.restarts.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects Pods whose container restart count increased above the configured threshold during the evaluation window.
+
+            The result is used as master data for low-level discovery of Pods with excessive recent restarts.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: "sum by(namespace,pod)(increase(kube_pod_container_status_restarts_total[15m]))>={$OCP.POD.RESTARTS.WARN}"
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: 2b869a6adeee4e51a0fb9fb2474fbaf4
+          name: "OCP: Critical PV status raw"
+          type: HTTP_AGENT
+          key: ocp.critical.pv.status.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects PersistentVolumes in failed or terminating state.
+
+            The result is used as master data for low-level discovery of PersistentVolumes requiring attention.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: 'label_replace((kube_persistentvolume_status_phase{phase="Failed"}==1) or (kube_persistentvolume_deletion_timestamp>0),"check","any","persistentvolume",".*") or label_replace(kube_persistentvolume_status_phase{phase="Failed"}==1,"check","failed","persistentvolume",".*") or label_replace(kube_persistentvolume_deletion_timestamp>0,"check","terminating","persistentvolume",".*")'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: 4e88746865464276808b0657eb3518dd
+          name: "OCP: Critical PVC usage raw"
+          type: HTTP_AGENT
+          key: ocp.critical.pvc.usage.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects PersistentVolumeClaims whose used capacity is above the configured warning threshold.
+
+            The result is used as master data for low-level discovery of PVCs requiring storage capacity attention.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: "100 * (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) >= {$OCP.PVC.WARN}"
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: b7b5f271656c45999dce31d224fccd29
+          name: "OCP: Critical ResourceQuota usage raw"
+          type: HTTP_AGENT
+          key: ocp.critical.resourcequota.usage.raw
+          delay: 10m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects ResourceQuota resources whose usage percentage is above the configured warning threshold.
+
+            The query calculates usage against the hard limit and ignores quota resources with an empty or zero hard limit. The result is used as master data for low-level discovery of namespace quota resources requiring attention.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: '((100 * kube_resourcequota{type="used"} / on(namespace,resourcequota,resource) kube_resourcequota{type="hard"}) and on(namespace,resourcequota,resource) (kube_resourcequota{type="hard"} > 0)) >= {$OCP.RQ.WARN}'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: 7bdfc770e7fe42d79bbf437c6bd65225
+          name: "OCP: Critical Routes status raw"
+          type: HTTP_AGENT
+          key: ocp.critical.routes.status.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects OpenShift Routes that are not admitted.
+
+            The result is used as master data for low-level discovery of Routes whose admission status indicates that traffic may not be correctly exposed.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: '((openshift_route_status{type="Admitted",status="True"} == bool 0) == 1)'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: c5423d9eb46a4065983304b5b1dd9dbc
+          name: "OCP: Critical Service endpoints status raw"
+          type: HTTP_AGENT
+          key: ocp.critical.services.endpoints.status.raw
+          delay: 5m
+          history: "0"
+          value_type: TEXT
+          trends: "0"
+          description: |
+            Collects Services with unavailable or not-ready endpoints.
+
+            The result is used as master data for low-level discovery of Services that have no available endpoints or one or more endpoints in not-ready state.
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: 'label_replace((kube_endpoint_info unless on(namespace,endpoint)(sum by(namespace,endpoint)(kube_endpoint_address_available)>0)) or (sum by(namespace,endpoint)(kube_endpoint_address_not_ready)>0),"check","any","endpoint",".*") or label_replace(kube_endpoint_info unless on(namespace,endpoint)(sum by(namespace,endpoint)(kube_endpoint_address_available)>0),"check","no_available","endpoint",".*") or label_replace(sum by(namespace,endpoint)(kube_endpoint_address_not_ready)>0,"check","not_ready","endpoint",".*")'
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+        - uuid: f4c71fc1353543e99a87111341c5fafc
+          name: "OCP: Etcd request latency p99"
+          type: HTTP_AGENT
+          key: ocp.etcd.request.latency.p99
+          delay: 5m
+          value_type: FLOAT
+          units: s
+          description: |
+            Collects the cluster-level p99 etcd request latency.
+
+            This item is not discovery-based and is used to monitor control-plane performance by evaluating high-percentile etcd request duration over the configured Prometheus range.
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[0].value[1]"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "0"
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: "histogram_quantile(0.99, sum(rate(etcd_request_duration_seconds_bucket[10m])) by (le)) or vector(0)"
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: aggregate
+          triggers:
+            - uuid: 02b6ba8152854bb3ac25a80d4189f180
+              expression: "min(/Template OpenShift Cluster by Thanos API/ocp.etcd.request.latency.p99,10m)>{$OCP.ETCD.LATENCY.P99.WARN}"
+              name: "OCP: Etcd request latency p99 is high"
+              priority: AVERAGE
+              manual_close: "YES"
+              tags:
+                - tag: impact
+                  value: performance
+        - uuid: 2bbef2034b034b159b346abeb1ac4428
+          name: "OCP: Thanos query health"
+          type: HTTP_AGENT
+          key: ocp.thanos.query.health
+          delay: 3m
+          description: |
+            Checks whether the Thanos query endpoint is reachable and able to return a valid Prometheus API response.
+
+            This item is intentionally not critical-only because it validates the monitoring path used by the whole template.
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[0].value[1]"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "0"
+          timeout: 30s
+          url: "{$OCP.THANOS.URL}/api/v1/query"
+          query_fields:
+            - name: query
+              value: vector(1)
+          headers:
+            - name: Authorization
+              value: "Bearer {$OCP.TOKEN}"
+            - name: Accept
+              value: application/json
+          tags:
+            - tag: item_type
+              value: raw
+          triggers:
+            - uuid: 6d4dfc2fbe0641c8bc7250365ab84b3d
+              expression: "max(/Template OpenShift Cluster by Thanos API/ocp.thanos.query.health,5m)<>1"
+              name: "OCP: Thanos query API is not healthy"
+              priority: HIGH
+              manual_close: "YES"
+              tags:
+                - tag: impact
+                  value: availability
+      discovery_rules:
+        - uuid: 7876e7169d7244ca914dec665ca8d1ed
+          name: "OCP Critical ClusterOperator Discovery"
+          type: DEPENDENT
+          key: ocp.critical.clusteroperator.discovery
+          delay: "0"
+          lifetime: 1h
+          item_prototypes:
+            - uuid: 77457b224a79455982e4eb74a76db53a
+              name: "ClusterOperator {#CO}: {#CO_CONDITION}"
+              type: DEPENDENT
+              key: "ocp.clusteroperator.critical[{#CO},{#CO_CONDITION}]"
+              delay: "0"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.name=="{#CO}" && @.metric.condition=="{#CO_CONDITION}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.clusteroperators.raw
+              tags:
+                - tag: object
+                  value: clusteroperator
+              trigger_prototypes:
+                - uuid: baceb1ccd816465fb3a208af9fe2948b
+                  expression: "min(/Template OpenShift Cluster by Thanos API/ocp.clusteroperator.critical[{#CO},{#CO_CONDITION}],5m)>0"
+                  name: "ClusterOperator {#CO}: Critical condition {#CO_CONDITION}"
+                  priority: HIGH
+                  manual_close: "YES"
+          master_item:
+            key: ocp.critical.clusteroperators.raw
+          lld_macro_paths:
+            - lld_macro: "{#CO_CONDITION}"
+              path: $.condition
+            - lld_macro: "{#CO}"
+              path: $.name
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: ffb2bfafb442446eb75adcdd3437fb1c
+          name: "OCP Critical Etcd Member Discovery"
+          type: DEPENDENT
+          key: ocp.critical.etcd.member.discovery
+          delay: "0"
+          lifetime: 1h
+          item_prototypes:
+            - uuid: fb241f68679e4b8195fa1ece9f52b4e1
+              name: "Etcd member {#ETCD_INSTANCE}: Critical state"
+              type: DEPENDENT
+              key: "ocp.etcd.member.critical_state[{#ETCD_INSTANCE}]"
+              delay: "0"
+              valuemap:
+                name: "OCP status: OK / Problem"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.instance=="{#ETCD_INSTANCE}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.etcd.members.status.raw
+              tags:
+                - tag: object
+                  value: etcd
+              trigger_prototypes:
+                - uuid: 6cba5826522d4f1983dfa94e25170337
+                  expression: "max(/Template OpenShift Cluster by Thanos API/ocp.etcd.member.critical_state[{#ETCD_INSTANCE}],5m)>0"
+                  name: "Etcd member {#ETCD_INSTANCE}: Critical state"
+                  priority: HIGH
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+          master_item:
+            key: ocp.critical.etcd.members.status.raw
+          lld_macro_paths:
+            - lld_macro: "{#ETCD_INSTANCE}"
+              path: $.instance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: 950d4ac2e0334d45adc2f48708efd410
+          name: "OCP Critical Job Status Discovery"
+          type: DEPENDENT
+          key: ocp.critical.job.status.discovery
+          delay: "0"
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.JOB.NS.MATCHES}"
+                formulaid: A
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.NS.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+          lifetime: 1h
+          item_prototypes:
+            - uuid: c4f8f8d709b849e1b995e142eedd138b
+              name: "Job {#NAMESPACE}/{#JOB}: Failed count"
+              type: DEPENDENT
+              key: "ocp.critical.job.failed[{#NAMESPACE},{#JOB}]"
+              delay: "0"
+              history: 7d
+              value_type: FLOAT
+              trends: "0"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.job_name=="{#JOB}" && @.metric.check=="failed")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.jobs.status.raw
+              tags:
+                - tag: object
+                  value: job
+              trigger_prototypes:
+                - uuid: 5479022c08884cc981933853d53c877b
+                  expression: "last(/Template OpenShift Cluster by Thanos API/ocp.critical.job.failed[{#NAMESPACE},{#JOB}])>0"
+                  name: "Job {#NAMESPACE}/{#JOB}: Failed"
+                  priority: AVERAGE
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+            - uuid: c00abb713ff24f7bb96fb2180db86ef7
+              name: "Job {#NAMESPACE}/{#JOB}: Running seconds"
+              type: DEPENDENT
+              key: "ocp.critical.job.running.seconds[{#NAMESPACE},{#JOB}]"
+              delay: "0"
+              history: 7d
+              value_type: FLOAT
+              trends: "0"
+              units: s
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.job_name=="{#JOB}" && @.metric.check=="longrunning")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.jobs.status.raw
+              tags:
+                - tag: object
+                  value: job
+              trigger_prototypes:
+                - uuid: cecd7f8b9303445191a2c9f59c1d396a
+                  expression: "last(/Template OpenShift Cluster by Thanos API/ocp.critical.job.running.seconds[{#NAMESPACE},{#JOB}])>={$OCP.JOB.MAX.RUN.TIME}"
+                  name: "Job {#NAMESPACE}/{#JOB}: Running for more than {$OCP.JOB.MAX.RUN.TIME} seconds"
+                  priority: AVERAGE
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: performance
+          master_item:
+            key: ocp.critical.jobs.status.raw
+          lld_macro_paths:
+            - lld_macro: "{#JOB}"
+              path: $.job_name
+            - lld_macro: "{#NAMESPACE}"
+              path: $.namespace
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.data.result[?(@.metric.check=="any")].metric'
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: 7453f589170441cfa814347a7cca1ff8
+          name: "OCP Critical Node Filesystem Discovery"
+          type: DEPENDENT
+          key: ocp.critical.node.filesystem.discovery
+          delay: "0"
+          filter:
+            conditions:
+              - macro: "{#FS_DEVICE}"
+                value: "{$OCP.NODE.FS.DEVICE.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: A
+              - macro: "{#FS_FSTYPE}"
+                value: "{$OCP.NODE.FS.FSTYPE.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+              - macro: "{#FS_MOUNTPOINT}"
+                value: "{$OCP.NODE.FS.MOUNTPOINT.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: C
+          lifetime: 1d
+          item_prototypes:
+            - uuid: d13c8600dfd24b5cbce5a3f88638eb62
+              name: "Node {#NODE_INSTANCE}: Filesystem {#FS_MOUNTPOINT} used %"
+              type: DEPENDENT
+              key: "ocp.critical.node.fs.used.percent[{#NODE_INSTANCE},{#FS_DEVICE},{#FS_MOUNTPOINT}]"
+              delay: "0"
+              history: 7d
+              value_type: FLOAT
+              trends: "0"
+              units: "%"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.instance=="{#NODE_INSTANCE}" && @.metric.device=="{#FS_DEVICE}" && @.metric.mountpoint=="{#FS_MOUNTPOINT}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.node.filesystems.raw
+              tags:
+                - tag: object
+                  value: node_filesystem
+              trigger_prototypes:
+                - uuid: 22b54d73e19a48adbe764c61c0cfefad
+                  expression: "min(/Template OpenShift Cluster by Thanos API/ocp.critical.node.fs.used.percent[{#NODE_INSTANCE},{#FS_DEVICE},{#FS_MOUNTPOINT}],10m)>={$OCP.NODE.FS.CRIT}"
+                  name: "Node {#NODE_INSTANCE}: Filesystem {#FS_MOUNTPOINT} used space is critical (>={$OCP.NODE.FS.CRIT}%)"
+                  priority: HIGH
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: capacity
+                - uuid: 63cd58ec204d4ea283fcabae1c704aad
+                  expression: "min(/Template OpenShift Cluster by Thanos API/ocp.critical.node.fs.used.percent[{#NODE_INSTANCE},{#FS_DEVICE},{#FS_MOUNTPOINT}],10m)>={$OCP.NODE.FS.WARN}"
+                  name: "Node {#NODE_INSTANCE}: Filesystem {#FS_MOUNTPOINT} used space is warning (>={$OCP.NODE.FS.WARN}%)"
+                  priority: WARNING
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: capacity
+          master_item:
+            key: ocp.critical.node.filesystems.raw
+          lld_macro_paths:
+            - lld_macro: "{#FS_DEVICE}"
+              path: $.device
+            - lld_macro: "{#FS_FSTYPE}"
+              path: $.fstype
+            - lld_macro: "{#FS_MOUNTPOINT}"
+              path: $.mountpoint
+            - lld_macro: "{#NODE_INSTANCE}"
+              path: $.instance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: 3d5c835c8a454249ba68631aab9ee7d2
+          name: "OCP Critical Node Status Discovery"
+          type: DEPENDENT
+          key: ocp.critical.node.status.discovery
+          delay: "0"
+          lifetime: 1h
+          item_prototypes:
+            - uuid: 2f35f163f5a34c3f9321983a0099ee54
+              name: "Node {#NODE}: Not ready"
+              type: DEPENDENT
+              key: "ocp.critical.node.not_ready[{#NODE}]"
+              delay: "0"
+              history: 7d
+              trends: "0"
+              valuemap:
+                name: "OCP status: OK / Problem"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.node=="{#NODE}" && @.metric.check=="not_ready")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.nodes.status.raw
+              tags:
+                - tag: object
+                  value: node
+              trigger_prototypes:
+                - uuid: da77aaa968174d10849268d5a255e9e3
+                  expression: "last(/Template OpenShift Cluster by Thanos API/ocp.critical.node.not_ready[{#NODE}])=1"
+                  name: "Node {#NODE}: Not ready"
+                  priority: HIGH
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+            - uuid: a557603ae63d464c8d84fa4f758e2a11
+              name: "Node {#NODE}: Unschedulable"
+              type: DEPENDENT
+              key: "ocp.node.unschedulable[{#NODE}]"
+              delay: "0"
+              history: 7d
+              trends: "0"
+              valuemap:
+                name: "OCP status: Yes / No"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.node=="{#NODE}" && @.metric.check=="unschedulable")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.nodes.status.raw
+              tags:
+                - tag: object
+                  value: node
+              trigger_prototypes:
+                - uuid: 4c384316dcb84e5391a4745a52c7f214
+                  expression: "max(/Template OpenShift Cluster by Thanos API/ocp.node.unschedulable[{#NODE}],10m)=1"
+                  name: "Node {#NODE}: Unschedulable"
+                  priority: AVERAGE
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: performance
+          master_item:
+            key: ocp.critical.nodes.status.raw
+          lld_macro_paths:
+            - lld_macro: "{#NODE}"
+              path: $.node
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.data.result[?(@.metric.check=="any")].metric'
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: e8e8e5cda1c64874adc446b23ba02810
+          name: "OCP Critical Pod CrashLoopBackOff Discovery"
+          type: DEPENDENT
+          key: ocp.critical.pod.crashloopbackoff.discovery
+          delay: "0"
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.POD.NS.MATCHES}"
+                formulaid: A
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.NS.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+          lifetime: 1h
+          item_prototypes:
+            - uuid: 51a76e4f47bf45698ac51803d0ac8dd6
+              name: "Pod {#NAMESPACE}/{#POD}: CrashLoopBackOff"
+              type: DEPENDENT
+              key: "ocp.pod.crashloopbackoff[{#NAMESPACE},{#POD}]"
+              delay: "0"
+              history: 7d
+              trends: "0"
+              valuemap:
+                name: "OCP status: OK / Problem"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.pod=="{#POD}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.pods.crashloopbackoff.raw
+              tags:
+                - tag: object
+                  value: pod
+              trigger_prototypes:
+                - uuid: ce64f229b0bf442db71f8d396f95f495
+                  expression: "max(/Template OpenShift Cluster by Thanos API/ocp.pod.crashloopbackoff[{#NAMESPACE},{#POD}],5m)>0"
+                  name: "Pod {#NAMESPACE}/{#POD}: CrashLoopBackOff"
+                  priority: HIGH
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+          master_item:
+            key: ocp.critical.pods.crashloopbackoff.raw
+          lld_macro_paths:
+            - lld_macro: "{#NAMESPACE}"
+              path: $.namespace
+            - lld_macro: "{#POD}"
+              path: $.pod
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: 9e1d19f6cce544f9a8d5c41b167b18cf
+          name: "OCP Critical Pod Problem State Discovery"
+          type: DEPENDENT
+          key: ocp.critical.pod.problem_state.discovery
+          delay: "0"
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.POD.NS.MATCHES}"
+                formulaid: A
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.NS.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+          lifetime: 1h
+          item_prototypes:
+            - uuid: a54b2d4a9af442d38e1fc2a6df040a4f
+              name: "Pod {#NAMESPACE}/{#POD}: Problem state"
+              type: DEPENDENT
+              key: "ocp.pod.problem_state[{#NAMESPACE},{#POD}]"
+              delay: "0"
+              history: 7d
+              trends: "0"
+              valuemap:
+                name: "OCP status: OK / Problem"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.pod=="{#POD}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.pods.problem_state.raw
+              tags:
+                - tag: object
+                  value: pod
+              trigger_prototypes:
+                - uuid: 7c4829489dec4c69a14682fcae9b3a21
+                  expression: "max(/Template OpenShift Cluster by Thanos API/ocp.pod.problem_state[{#NAMESPACE},{#POD}],5m)>0"
+                  name: "Pod {#NAMESPACE}/{#POD}: Not running or not ready"
+                  priority: HIGH
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+          master_item:
+            key: ocp.critical.pods.problem_state.raw
+          lld_macro_paths:
+            - lld_macro: "{#NAMESPACE}"
+              path: $.namespace
+            - lld_macro: "{#POD}"
+              path: $.pod
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: b1adf6fa49284378b440445e7834fca1
+          name: "OCP Critical Pod Restarts Discovery"
+          type: DEPENDENT
+          key: ocp.critical.pod.restarts.discovery
+          delay: "0"
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.POD.NS.MATCHES}"
+                formulaid: A
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.NS.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+          lifetime: 1h
+          item_prototypes:
+            - uuid: ac990e93472441a899429649207944e4
+              name: "Pod {#NAMESPACE}/{#POD}: Restarts in 15m"
+              type: DEPENDENT
+              key: "ocp.pod.restarts.15m[{#NAMESPACE},{#POD}]"
+              delay: "0"
+              history: 7d
+              value_type: FLOAT
+              trends: "0"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.pod=="{#POD}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.pods.restarts.raw
+              tags:
+                - tag: object
+                  value: pod
+              trigger_prototypes:
+                - uuid: 217b3a78d2184e20b991c3952c03ae76
+                  expression: "last(/Template OpenShift Cluster by Thanos API/ocp.pod.restarts.15m[{#NAMESPACE},{#POD}])>={$OCP.POD.RESTARTS.WARN}"
+                  name: "Pod {#NAMESPACE}/{#POD}: Too many restarts in 15m"
+                  priority: AVERAGE
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: performance
+          master_item:
+            key: ocp.critical.pods.restarts.raw
+          lld_macro_paths:
+            - lld_macro: "{#NAMESPACE}"
+              path: $.namespace
+            - lld_macro: "{#POD}"
+              path: $.pod
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: eb3d5c5436a24a7bacfe709694c13df1
+          name: "OCP Critical PV Status Discovery"
+          type: DEPENDENT
+          key: ocp.critical.pv.status.discovery
+          delay: "0"
+          lifetime: 1h
+          item_prototypes:
+            - uuid: 9fb6d655138f4c9cad2d0ac8724ed411
+              name: "PV {#PV}: Deletion timestamp"
+              type: DEPENDENT
+              key: "ocp.critical.pv.deletion_timestamp[{#PV}]"
+              delay: "0"
+              history: 7d
+              trends: "0"
+              units: unixtime
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.persistentvolume=="{#PV}" && @.metric.check=="terminating")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.pv.status.raw
+              tags:
+                - tag: object
+                  value: pv
+              trigger_prototypes:
+                - uuid: 40a9dbb250d94bd9bd0ea78ba55f293e
+                  expression: "min(/Template OpenShift Cluster by Thanos API/ocp.critical.pv.deletion_timestamp[{#PV}],30m)>0"
+                  name: "PV {#PV}: Terminating for too long"
+                  priority: AVERAGE
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+            - uuid: 812cce22f1124c338bbaad00ae08f97c
+              name: "PV {#PV}: Failed"
+              type: DEPENDENT
+              key: "ocp.critical.pv.failed[{#PV}]"
+              delay: "0"
+              history: 7d
+              trends: "0"
+              valuemap:
+                name: "OCP status: OK / Problem"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.persistentvolume=="{#PV}" && @.metric.check=="failed")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.pv.status.raw
+              tags:
+                - tag: object
+                  value: pv
+              trigger_prototypes:
+                - uuid: 1e77025352224cc2a039c951bbf8f491
+                  expression: "last(/Template OpenShift Cluster by Thanos API/ocp.critical.pv.failed[{#PV}])=1"
+                  name: "PV {#PV}: Failed"
+                  priority: HIGH
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+          master_item:
+            key: ocp.critical.pv.status.raw
+          lld_macro_paths:
+            - lld_macro: "{#PV}"
+              path: $.persistentvolume
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.data.result[?(@.metric.check=="any")].metric'
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: fa7dec83fa814eb0b72974ba9e3e22a7
+          name: "OCP Critical PVC Usage Discovery"
+          type: DEPENDENT
+          key: ocp.critical.pvc.usage.discovery
+          delay: "0"
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.PVC.NS.MATCHES}"
+                formulaid: A
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.NS.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+          lifetime: 6h
+          item_prototypes:
+            - uuid: 53ae7472db174075a62e0463d4e13e49
+              name: "PVC {#NAMESPACE}/{#PVC}: Used %"
+              type: DEPENDENT
+              key: "ocp.critical.pvc.used.percent[{#NAMESPACE},{#PVC}]"
+              delay: "0"
+              history: 7d
+              value_type: FLOAT
+              trends: "0"
+              units: "%"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.persistentvolumeclaim=="{#PVC}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.pvc.usage.raw
+              tags:
+                - tag: object
+                  value: pvc
+              trigger_prototypes:
+                - uuid: 1069d33e584645119ee605bb850358a2
+                  expression: "min(/Template OpenShift Cluster by Thanos API/ocp.critical.pvc.used.percent[{#NAMESPACE},{#PVC}],10m)>={$OCP.PVC.CRIT}"
+                  name: "PVC {#NAMESPACE}/{#PVC}: Used space is critical (>={$OCP.PVC.CRIT}%)"
+                  priority: HIGH
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: capacity
+                - uuid: 053b7a837f5d47ca8a1046b2630c6b06
+                  expression: "min(/Template OpenShift Cluster by Thanos API/ocp.critical.pvc.used.percent[{#NAMESPACE},{#PVC}],10m)>={$OCP.PVC.WARN}"
+                  name: "PVC {#NAMESPACE}/{#PVC}: Used space is warning (>={$OCP.PVC.WARN}%)"
+                  priority: WARNING
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: capacity
+          master_item:
+            key: ocp.critical.pvc.usage.raw
+          lld_macro_paths:
+            - lld_macro: "{#NAMESPACE}"
+              path: $.namespace
+            - lld_macro: "{#PVC}"
+              path: $.persistentvolumeclaim
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: 5a89cce6a9504a75a6d320295dd4a933
+          name: "OCP Critical ResourceQuota Usage Discovery"
+          type: DEPENDENT
+          key: ocp.critical.resourcequota.usage.discovery
+          delay: "0"
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.RQ.NS.MATCHES}"
+                formulaid: A
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.NS.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+              - macro: "{#RESOURCE}"
+                value: "{$OCP.RQ.RESOURCE.MATCHES}"
+                formulaid: C
+              - macro: "{#RESOURCE}"
+                value: "{$OCP.RQ.RESOURCE.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: D
+          lifetime: 1d
+          item_prototypes:
+            - uuid: 3d1bf710584c45fd919ee3ad50204784
+              name: "ResourceQuota {#NAMESPACE}/{#RESOURCEQUOTA}/{#RESOURCE}: Used %"
+              type: DEPENDENT
+              key: "ocp.critical.resourcequota.used.percent[{#NAMESPACE},{#RESOURCEQUOTA},{#RESOURCE}]"
+              delay: "0"
+              history: 7d
+              value_type: FLOAT
+              trends: "0"
+              units: "%"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.resourcequota=="{#RESOURCEQUOTA}" && @.metric.resource=="{#RESOURCE}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.resourcequota.usage.raw
+              tags:
+                - tag: object
+                  value: resourcequota
+              trigger_prototypes:
+                - uuid: 847a451ec7f9496f8849c971da557789
+                  expression: "min(/Template OpenShift Cluster by Thanos API/ocp.critical.resourcequota.used.percent[{#NAMESPACE},{#RESOURCEQUOTA},{#RESOURCE}],10m)>={$OCP.RQ.CRIT}"
+                  name: "ResourceQuota {#NAMESPACE}/{#RESOURCEQUOTA}/{#RESOURCE}: Usage is critical (>={$OCP.RQ.CRIT}%)"
+                  priority: HIGH
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: capacity
+                - uuid: 92e897d4db434ea2b03aad1038bc7047
+                  expression: "min(/Template OpenShift Cluster by Thanos API/ocp.critical.resourcequota.used.percent[{#NAMESPACE},{#RESOURCEQUOTA},{#RESOURCE}],10m)>={$OCP.RQ.WARN}"
+                  name: "ResourceQuota {#NAMESPACE}/{#RESOURCEQUOTA}/{#RESOURCE}: Usage is warning (>={$OCP.RQ.WARN}%)"
+                  priority: WARNING
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: capacity
+          master_item:
+            key: ocp.critical.resourcequota.usage.raw
+          lld_macro_paths:
+            - lld_macro: "{#NAMESPACE}"
+              path: $.namespace
+            - lld_macro: "{#RESOURCEQUOTA}"
+              path: $.resourcequota
+            - lld_macro: "{#RESOURCE}"
+              path: $.resource
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: 1e652aa86d1f4eca9e2458b6af012048
+          name: "OCP Critical Route Status Discovery"
+          type: DEPENDENT
+          key: ocp.critical.route.status.discovery
+          delay: "0"
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.ROUTE.NS.MATCHES}"
+                formulaid: A
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.NS.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+          lifetime: 1d
+          item_prototypes:
+            - uuid: aa2294b6d2624382848bce9a046beadd
+              name: "Route {#NAMESPACE}/{#ROUTE}: Not admitted"
+              type: DEPENDENT
+              key: "ocp.critical.route.not_admitted[{#NAMESPACE},{#ROUTE}]"
+              delay: "0"
+              history: 7d
+              trends: "0"
+              valuemap:
+                name: "OCP status: OK / Problem"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.route=="{#ROUTE}")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.routes.status.raw
+              tags:
+                - tag: object
+                  value: route
+              trigger_prototypes:
+                - uuid: 20e15e95053245d3a20d4b76379a9628
+                  expression: "last(/Template OpenShift Cluster by Thanos API/ocp.critical.route.not_admitted[{#NAMESPACE},{#ROUTE}])=1"
+                  name: "Route {#NAMESPACE}/{#ROUTE}: Not admitted"
+                  priority: AVERAGE
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+          master_item:
+            key: ocp.critical.routes.status.raw
+          lld_macro_paths:
+            - lld_macro: "{#NAMESPACE}"
+              path: $.namespace
+            - lld_macro: "{#ROUTE}"
+              path: $.route
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - "$.data.result[*].metric"
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+        - uuid: 73cc026715f3417ead4294b5da3ce6d3
+          name: "OCP Critical Service Endpoint Status Discovery"
+          type: DEPENDENT
+          key: ocp.critical.service.endpoint.status.discovery
+          delay: "0"
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.SVC.NS.MATCHES}"
+                formulaid: A
+              - macro: "{#NAMESPACE}"
+                value: "{$OCP.NS.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+              - macro: "{#SERVICE}"
+                value: "{$OCP.SVC.NOT_MATCHES}"
+                operator: NOT_MATCHES_REGEX
+                formulaid: C
+          lifetime: 1h
+          item_prototypes:
+            - uuid: e298ac90a3444eed9d1f5e1cf94c12fc
+              name: "Service {#NAMESPACE}/{#SERVICE}: Not ready endpoints"
+              type: DEPENDENT
+              key: "ocp.critical.service.not_ready_endpoints[{#NAMESPACE},{#SERVICE}]"
+              delay: "0"
+              history: 7d
+              value_type: FLOAT
+              trends: "0"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.endpoint=="{#SERVICE}" && @.metric.check=="not_ready")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.services.endpoints.status.raw
+              tags:
+                - tag: object
+                  value: service
+              trigger_prototypes:
+                - uuid: ab416684601e4ef2b104620716a77bbe
+                  expression: "last(/Template OpenShift Cluster by Thanos API/ocp.critical.service.not_ready_endpoints[{#NAMESPACE},{#SERVICE}])>0"
+                  name: "Service {#NAMESPACE}/{#SERVICE}: Not ready endpoints"
+                  priority: WARNING
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+            - uuid: 8885a9938ed54efebefcece9a6e35a1e
+              name: "Service {#NAMESPACE}/{#SERVICE}: No available endpoints"
+              type: DEPENDENT
+              key: "ocp.critical.service.no_available_endpoints[{#NAMESPACE},{#SERVICE}]"
+              delay: "0"
+              history: 7d
+              trends: "0"
+              valuemap:
+                name: "OCP status: Yes / No"
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data.result[?(@.metric.namespace=="{#NAMESPACE}" && @.metric.endpoint=="{#SERVICE}" && @.metric.check=="no_available")].value[1].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: "0"
+              master_item:
+                key: ocp.critical.services.endpoints.status.raw
+              tags:
+                - tag: object
+                  value: service
+              trigger_prototypes:
+                - uuid: ef57dc84fada4f38afcc968d94ec15af
+                  expression: "last(/Template OpenShift Cluster by Thanos API/ocp.critical.service.no_available_endpoints[{#NAMESPACE},{#SERVICE}])=1"
+                  name: "Service {#NAMESPACE}/{#SERVICE}: No available endpoints"
+                  priority: WARNING
+                  manual_close: "YES"
+                  tags:
+                    - tag: impact
+                      value: availability
+          master_item:
+            key: ocp.critical.services.endpoints.status.raw
+          lld_macro_paths:
+            - lld_macro: "{#NAMESPACE}"
+              path: $.namespace
+            - lld_macro: "{#SERVICE}"
+              path: $.endpoint
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.data.result[?(@.metric.check=="any")].metric'
+              error_handler: CUSTOM_VALUE
+              error_handler_params: "[]"
+      tags:
+        - tag: datasource
+          value: thanos
+        - tag: platform
+          value: openshift
+        - tag: target
+          value: critical-object
+      macros:
+        - macro: "{$OCP.CO.PROGRESSING.MAX.TIME}"
+          value: "1800"
+          description: "Maximum time, in seconds, a ClusterOperator can remain in Progressing=True before triggering an alert."
+        - macro: "{$OCP.ETCD.LATENCY.P99.WARN}"
+          value: "1"
+          description: "Warning threshold in seconds for etcd p99 latency."
+        - macro: "{$OCP.JOB.MAX.RUN.TIME}"
+          value: "1800"
+          description: "The number of seconds after which an active job is considered long-running."
+        - macro: "{$OCP.JOB.NS.MATCHES}"
+          value: ".*"
+          description: "Regex for the namespaces in which to enable critical job discovery."
+        - macro: "{$OCP.NODE.FS.CRIT}"
+          value: "90"
+          description: "Critical threshold for file system node usage, expressed as a percentage."
+        - macro: "{$OCP.NODE.FS.DEVICE.NOT_MATCHES}"
+          value: ^(rootfs)$
+          description: "Devices to exclude from filesystem node queries."
+        - macro: "{$OCP.NODE.FS.FSTYPE.NOT_MATCHES}"
+          value: "^(tmpfs|overlay|squashfs|nsfs|proc|sysfs|devtmpfs|cgroup2?|mqueue|hugetlbfs|securityfs|debugfs|tracefs)$"
+          description: "File system types to exclude from node file system queries."
+        - macro: "{$OCP.NODE.FS.MOUNTPOINT.NOT_MATCHES}"
+          value: "^/run($|/.*)|^/var/lib/kubelet/pods/.*|^/var/lib/containers/storage/.*|^/proc($|/.*)|^/sys($|/.*)|^/dev($|/.*)"
+          description: "Mount points to exclude from filesystem node queries."
+        - macro: "{$OCP.NODE.FS.WARN}"
+          value: "75"
+          description: "Warning threshold for file system node usage, expressed as a percentage."
+        - macro: "{$OCP.NS.NOT_MATCHES}"
+          value: ^$
+          description: "Global regex to exclude namespaces from problem-based discovery. ^$ = excludes nothing."
+        - macro: "{$OCP.POD.NS.MATCHES}"
+          value: ".*"
+          description: "Regex for the namespaces in which to enable critical Pod discovery."
+        - macro: "{$OCP.POD.RESTARTS.WARN}"
+          value: "3"
+          description: "Restart threshold set to 15 minutes for generating critical Pod objects."
+        - macro: "{$OCP.PVC.CRIT}"
+          value: "90"
+          description: "Critical threshold for PVC use, expressed as a percentage."
+        - macro: "{$OCP.PVC.NS.MATCHES}"
+          value: ".*"
+          description: "Regex for the namespaces in which to enable critical PVC discovery."
+        - macro: "{$OCP.PVC.WARN}"
+          value: "75"
+          description: "Warning threshold for PVC use, expressed as a percentage."
+        - macro: "{$OCP.ROUTE.NS.MATCHES}"
+          value: ".*"
+          description: "Regex for the namespaces in which to enable critical route discovery."
+        - macro: "{$OCP.RQ.CRIT}"
+          value: "90"
+          description: "ResourceQuota usage critical threshold, expressed as a percentage."
+        - macro: "{$OCP.RQ.NS.MATCHES}"
+          value: ".*"
+          description: "Regex for the namespaces in which to enable critical ResourceQuota discovery."
+        - macro: "{$OCP.RQ.RESOURCE.MATCHES}"
+          value: ".*"
+          description: "Regular expression for the ResourceQuota resources to include."
+        - macro: "{$OCP.RQ.RESOURCE.NOT_MATCHES}"
+          value: ^$
+          description: "Regular expression for ResourceQuota resources to exclude. ^$ = excludes nothing."
+        - macro: "{$OCP.RQ.WARN}"
+          value: "75"
+          description: "ResourceQuota usage warning threshold, expressed as a percentage."
+        - macro: "{$OCP.SVC.NOT_MATCHES}"
+          value: ^$
+          description: "Regex to exclude services/endpoints from Service discovery. ^$ = excludes nothing."
+        - macro: "{$OCP.SVC.NS.MATCHES}"
+          value: ".*"
+          description: "Regex for the namespaces in which to enable critical discovery of service endpoints."
+        - macro: "{$OCP.THANOS.URL}"
+          value: "https://thanos-querier.example.com"
+          description: "Thanos Querier base URL."
+        - macro: "{$OCP.TOKEN}"
+          type: SECRET_TEXT
+          description: "Bearer token for querying the Thanos/OpenShift monitoring API."
+      valuemaps:
+        - uuid: cea0b50788cd47169c6ebf5112996d13
+          name: "OCP status: Healthy / Unhealthy"
+          mappings:
+            - value: "0"
+              newvalue: Unhealthy
+            - value: "1"
+              newvalue: Healthy
+        - uuid: f42a337e5ee34b8ca37e5d4f82d94723
+          name: "OCP status: OK / Problem"
+          mappings:
+            - value: "0"
+              newvalue: OK
+            - value: "1"
+              newvalue: Problem
+        - uuid: f72472907b344408b43ce9b5c08fa5fa
+          name: "OCP status: Up / Down"
+          mappings:
+            - value: "0"
+              newvalue: Down
+            - value: "1"
+              newvalue: Up
+        - uuid: 318d97fcf0fe4f7888425dd0956e656e
+          name: "OCP status: Yes / No"
+          mappings:
+            - value: "0"
+              newvalue: "No"
+            - value: "1"
+              newvalue: "Yes"
